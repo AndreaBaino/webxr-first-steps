@@ -31,9 +31,9 @@ const blasterInertia = {
 	maxTilt: 0.12,
 };
 
-// Sfera con liquido finto - ruota in senso opposto al movimento, oscillazione quando si ferma
-const liquidSphereGroup = new THREE.Group();
-let liquidMesh = null;
+// Sfere con liquido finto (due occhi) - ruotano in senso opposto al movimento
+const liquidSpheresContainer = new THREE.Group();
+const liquidMeshes = []; // [{ mesh, inertia }, ...]
 const liquidSphereInertia = {
 	prevPos: new THREE.Vector3(),
 	tiltX: 0,
@@ -67,8 +67,11 @@ function updateScoreDisplay() {
 }
 
 function setupScene({ scene, camera, renderer, player, controllers }) {
-	// Sfera con liquido finto davanti alla camera
+	// Due sfere con liquido (occhi) davanti alla camera
 	const sphereRadius = 0.15;
+	const eyeOffset = 0.2;
+	const leftInertia = 1;
+	const rightInertia = 0.1;
 	const glassGeometry = new THREE.SphereGeometry(sphereRadius, 32, 32);
 	const glassMaterial = new THREE.MeshPhysicalMaterial({
 		color: 0x88aacc,
@@ -80,9 +83,6 @@ function setupScene({ scene, camera, renderer, player, controllers }) {
 		thickness: 0.02,
 		side: THREE.FrontSide,
 	});
-	const glassSphere = new THREE.Mesh(glassGeometry, glassMaterial);
-	liquidSphereGroup.add(glassSphere);
-
 	const liquidGeometry = new THREE.CircleGeometry(sphereRadius * 0.88, 32);
 	const liquidMaterial = new THREE.MeshPhysicalMaterial({
 		color: 0x44aaff,
@@ -90,15 +90,29 @@ function setupScene({ scene, camera, renderer, player, controllers }) {
 		metalness: 0,
 		side: THREE.DoubleSide,
 	});
-	liquidMesh = new THREE.Mesh(liquidGeometry, liquidMaterial);
-	liquidMesh.position.y = -sphereRadius * 0.35;
-	liquidMesh.rotation.x = -Math.PI / 2;
-	liquidMesh.renderOrder = 1;
-	liquidSphereGroup.add(liquidMesh);
 
-	liquidSphereGroup.position.set(0, 0, -1.2);
-	liquidSphereGroup.scale.setScalar(0.8);
-	camera.add(liquidSphereGroup);
+	const inertias = [leftInertia, rightInertia];
+	for (let i = 0; i < 2; i++) {
+		const x = i === 0 ? -eyeOffset : eyeOffset;
+		const group = new THREE.Group();
+		group.position.x = x;
+
+		const glassSphere = new THREE.Mesh(glassGeometry.clone(), glassMaterial);
+		group.add(glassSphere);
+
+		const liquidMesh = new THREE.Mesh(liquidGeometry.clone(), liquidMaterial);
+		liquidMesh.position.y = -sphereRadius * 0.35;
+		liquidMesh.rotation.x = -Math.PI / 2;
+		liquidMesh.renderOrder = 1;
+		group.add(liquidMesh);
+		liquidMeshes.push({ mesh: liquidMesh, inertia: inertias[i] });
+
+		liquidSpheresContainer.add(group);
+	}
+
+	liquidSpheresContainer.position.set(0, 0, -1.2);
+	liquidSpheresContainer.scale.setScalar(0.8);
+	camera.add(liquidSpheresContainer);
 	camera.getWorldPosition(liquidSphereInertia.prevPos);
 
 	const gltfLoader = new GLTFLoader();
@@ -191,11 +205,11 @@ function onFrame(
 	liquidSphereInertia.tiltY += liquidSphereInertia.velY * delta;
 	liquidSphereInertia.tiltZ += liquidSphereInertia.velZ * delta;
 
-	if (liquidMesh) {
-		liquidMesh.rotation.x = -Math.PI / 2 + liquidSphereInertia.tiltZ;
-		liquidMesh.rotation.y = liquidSphereInertia.tiltX;
-		liquidMesh.rotation.z = liquidSphereInertia.tiltY;
-	}
+	liquidMeshes.forEach(({ mesh, inertia }) => {
+		mesh.rotation.x = -Math.PI / 2 + liquidSphereInertia.tiltZ * inertia;
+		mesh.rotation.y = liquidSphereInertia.tiltX * inertia;
+		mesh.rotation.z = liquidSphereInertia.tiltY * inertia;
+	});
 
 	if (controllers.right) {
 		const { gamepad, raySpace, mesh } = controllers.right;
