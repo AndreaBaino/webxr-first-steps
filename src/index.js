@@ -36,6 +36,8 @@ const liquidSpheresContainer = new THREE.Group();
 const liquidMeshes = []; // [{ mesh, inertia }, ...]
 const liquidSphereInertia = {
 	prevPos: new THREE.Vector3(),
+	prevQuat: new THREE.Quaternion(),
+	hasPrevQuat: false,
 	tiltX: 0,
 	tiltY: 0,
 	tiltZ: 0,
@@ -46,7 +48,9 @@ const liquidSphereInertia = {
 	spring: 12,
 	damping: 4,
 	maxTilt: 0.18,
+	gyroSensitivity: 0.015,
 };
+const gyroRate = { alpha: 0, beta: 0, gamma: 0 }; // DeviceMotion deg/s
 
 let score = 0;
 const scoreText = new Text();
@@ -115,6 +119,26 @@ function setupScene({ scene, camera, renderer, player, controllers }) {
 	camera.add(liquidSpheresContainer);
 	camera.getWorldPosition(liquidSphereInertia.prevPos);
 
+	// Giroscopio DeviceMotion (mobile, richiede permesso su iOS)
+	if (typeof DeviceMotionEvent !== 'undefined') {
+		const onMotion = (e) => {
+			if (e.rotationRate) {
+				gyroRate.alpha = e.rotationRate.alpha ?? 0;
+				gyroRate.beta = e.rotationRate.beta ?? 0;
+				gyroRate.gamma = e.rotationRate.gamma ?? 0;
+			}
+		};
+		if (typeof DeviceMotionEvent.requestPermission === 'function') {
+			window.requestGyroPermission = () => {
+				DeviceMotionEvent.requestPermission()
+					.then((p) => p === 'granted' && window.addEventListener('devicemotion', onMotion))
+					.catch(console.warn);
+			};
+		} else {
+			window.addEventListener('devicemotion', onMotion);
+		}
+	}
+
 	const gltfLoader = new GLTFLoader();
 
 	gltfLoader.load('assets/spacestation.glb', (gltf) => {
@@ -166,13 +190,15 @@ function onFrame(
 	time,
 	{ scene, camera, renderer, player, controllers },
 ) {
-	// Liquido: ruota in senso opposto allo spostamento, oscillazione quando ti fermi
-	// In VR usa il controller (camera non aggiornata prima di onFrame), altrimenti la camera
+	// Liquido: ruota in senso opposto allo spostamento + giroscopio, oscillazione quando ti fermi
 	const refPos = new THREE.Vector3();
+	let refQuat = null;
 	if (controllers.right) {
 		controllers.right.raySpace.getWorldPosition(refPos);
+		refQuat = controllers.right.raySpace.quaternion.clone();
 	} else {
 		camera.getWorldPosition(refPos);
+		refQuat = camera.quaternion.clone();
 	}
 	const refVelocity = refPos
 		.clone()
@@ -180,18 +206,41 @@ function onFrame(
 		.divideScalar(Math.max(delta, 0.001));
 	liquidSphereInertia.prevPos.copy(refPos);
 
+	// Velocità angolare da quaternion (VR / camera)
+	let angVelX = 0,
+		angVelY = 0,
+		angVelZ = 0;
+	if (liquidSphereInertia.hasPrevQuat) {
+		const dq = refQuat.clone().multiply(liquidSphereInertia.prevQuat.clone().invert());
+		const euler = new THREE.Euler().setFromQuaternion(dq, 'YXZ');
+		const dt = Math.max(delta, 0.001);
+		angVelX = euler.x / dt;
+		angVelY = euler.y / dt;
+		angVelZ = euler.z / dt;
+	}
+	liquidSphereInertia.prevQuat.copy(refQuat);
+	liquidSphereInertia.hasPrevQuat = true;
+
+	// DeviceMotion gyro (deg/s -> rad/s scale)
+	const gs = liquidSphereInertia.gyroSensitivity;
+	const gyroX = (gyroRate.gamma * Math.PI) / 180;
+	const gyroY = (gyroRate.alpha * Math.PI) / 180;
+	const gyroZ = (gyroRate.beta * Math.PI) / 180;
+
 	const targetX = THREE.MathUtils.clamp(
-		-refVelocity.x * liquidSphereInertia.sensitivity * 0.8,
+		-refVelocity.x * liquidSphereInertia.sensitivity * 0.8 -
+			angVelY * gs -
+			gyroY * gs * 2,
 		-liquidSphereInertia.maxTilt,
 		liquidSphereInertia.maxTilt,
 	);
 	const targetY = THREE.MathUtils.clamp(
-		-refVelocity.x * liquidSphereInertia.sensitivity,
+		-refVelocity.x * liquidSphereInertia.sensitivity - angVelZ * gs - gyroZ * gs * 2,
 		-liquidSphereInertia.maxTilt,
 		liquidSphereInertia.maxTilt,
 	);
 	const targetZ = THREE.MathUtils.clamp(
-		refVelocity.z * liquidSphereInertia.sensitivity * 0.5,
+		refVelocity.z * liquidSphereInertia.sensitivity * 0.5 + angVelX * gs + gyroX * gs * 2,
 		-liquidSphereInertia.maxTilt,
 		liquidSphereInertia.maxTilt,
 	);
@@ -218,6 +267,7 @@ function onFrame(
 			mesh.visible = false;
 			raySpace.getWorldPosition(blasterInertia.prevPos);
 			raySpace.getWorldPosition(liquidSphereInertia.prevPos);
+			liquidSphereInertia.prevQuat.copy(raySpace.quaternion);
 		}
 
 		// Oscillazione/inerzia del blaster in base al movimento orizzontale
