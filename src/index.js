@@ -33,9 +33,11 @@ const blasterInertia = {
 
 // Sfere con liquido finto (due occhi) - piani sempre verso l'alto (giroscopio)
 const liquidSpheresContainer = new THREE.Group();
-const liquidMeshes = []; // [{ mesh }, ...]
+const liquidMeshes = []; // [{ mesh, inertia }, ...]
 const liquidBaseQuat = new THREE.Quaternion().setFromEuler(new THREE.Euler(-Math.PI / 2, 0, 0));
 const liquidParentWorldQuat = new THREE.Quaternion();
+const liquidInertiaEuler = new THREE.Euler(0, 0, 0, 'XYZ');
+const liquidInertiaQuat = new THREE.Quaternion();
 const liquidSphereInertia = {
 	prevPos: new THREE.Vector3(),
 	prevQuat: new THREE.Quaternion(),
@@ -151,7 +153,6 @@ function setupScene({ scene, camera, renderer, css3dScene }) {
 
 		const liquidMesh = new THREE.Mesh(liquidGeometry.clone(), liquidMaterial);
 		liquidMesh.position.y = -sphereRadius * 0.35;
-		liquidMesh.rotation.x = -Math.PI / 2;
 		liquidMesh.renderOrder = 1;
 		group.add(liquidMesh);
 		liquidMeshes.push({ mesh: liquidMesh, inertia: inertias[i] });
@@ -326,7 +327,7 @@ function onFrame(
 	// In VR nascondi puntatore
 	if (pointerElRef) pointerElRef.style.display = renderer.xr.isPresenting ? 'none' : '';
 
-	// Liquido: ruota in senso opposto allo spostamento + giroscopio, oscillazione quando ti fermi
+	// Riferimento posizione/quaternion (camera o controller) per VR init e blaster
 	const refPos = new THREE.Vector3();
 	let refQuat = null;
 	if (controllers.right) {
@@ -342,10 +343,7 @@ function onFrame(
 		.divideScalar(Math.max(delta, 0.001));
 	liquidSphereInertia.prevPos.copy(refPos);
 
-	// Velocità angolare da quaternion (VR / camera)
-	let angVelX = 0,
-		angVelY = 0,
-		angVelZ = 0;
+	let angVelX = 0, angVelY = 0, angVelZ = 0;
 	if (liquidSphereInertia.hasPrevQuat) {
 		const dq = refQuat.clone().multiply(liquidSphereInertia.prevQuat.clone().invert());
 		const euler = new THREE.Euler().setFromQuaternion(dq, 'YXZ');
@@ -357,16 +355,13 @@ function onFrame(
 	liquidSphereInertia.prevQuat.copy(refQuat);
 	liquidSphereInertia.hasPrevQuat = true;
 
-	// DeviceMotion gyro (deg/s -> rad/s scale)
 	const gs = liquidSphereInertia.gyroSensitivity;
 	const gyroX = (gyroRate.gamma * Math.PI) / 180;
 	const gyroY = (gyroRate.alpha * Math.PI) / 180;
 	const gyroZ = (gyroRate.beta * Math.PI) / 180;
 
 	const targetX = THREE.MathUtils.clamp(
-		-refVelocity.x * liquidSphereInertia.sensitivity * 0.8 -
-			angVelY * gs -
-			gyroY * gs * 2,
+		-refVelocity.x * liquidSphereInertia.sensitivity * 0.8 - angVelY * gs - gyroY * gs * 2,
 		-liquidSphereInertia.maxTilt,
 		liquidSphereInertia.maxTilt,
 	);
@@ -390,10 +385,21 @@ function onFrame(
 	liquidSphereInertia.tiltY += liquidSphereInertia.velY * delta;
 	liquidSphereInertia.tiltZ += liquidSphereInertia.velZ * delta;
 
+	// Piani liquido: verso l'alto (giroscopio) + oscillazione da inerzia (simulazione liquido)
+	camera.updateMatrixWorld(true);
 	liquidMeshes.forEach(({ mesh, inertia }) => {
-		mesh.rotation.x = -Math.PI / 2 + liquidSphereInertia.tiltZ * inertia;
-		mesh.rotation.y = liquidSphereInertia.tiltX * inertia;
-		mesh.rotation.z = liquidSphereInertia.tiltY * inertia;
+		mesh.parent.getWorldQuaternion(liquidParentWorldQuat);
+		liquidInertiaEuler.set(
+			liquidSphereInertia.tiltZ * inertia,
+			liquidSphereInertia.tiltX * inertia,
+			liquidSphereInertia.tiltY * inertia,
+		);
+		liquidInertiaQuat.setFromEuler(liquidInertiaEuler);
+		mesh.quaternion
+			.copy(liquidParentWorldQuat)
+			.invert()
+			.multiply(liquidBaseQuat)
+			.multiply(liquidInertiaQuat);
 	});
 
 	if (controllers.right) {
