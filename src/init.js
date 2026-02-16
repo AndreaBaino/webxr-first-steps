@@ -8,7 +8,7 @@
 import * as THREE from 'three';
 
 import { XRDevice, metaQuest3 } from 'iwer';
-
+import { CSS3DRenderer } from 'three/addons/renderers/CSS3DRenderer.js';
 import { DevUI } from '@iwer/devui';
 import { GamepadWrapper } from 'gamepad-wrapper';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
@@ -67,7 +67,18 @@ export async function init(setupScene = () => {}, onFrame = () => {}) {
 	renderer.setPixelRatio(window.devicePixelRatio);
 	renderer.setSize(window.innerWidth, window.innerHeight);
 	renderer.xr.enabled = true;
+	container.style.position = 'relative';
 	container.appendChild(renderer.domElement);
+
+	const css3dRenderer = new CSS3DRenderer();
+	css3dRenderer.setSize(window.innerWidth, window.innerHeight);
+	css3dRenderer.domElement.style.position = 'absolute';
+	css3dRenderer.domElement.style.top = '0';
+	css3dRenderer.domElement.style.left = '0';
+	css3dRenderer.domElement.style.pointerEvents = 'none';
+	container.appendChild(css3dRenderer.domElement);
+
+	const css3dScene = new THREE.Scene();
 
 	const environment = new RoomEnvironment(renderer);
 	const pmremGenerator = new THREE.PMREMGenerator(renderer);
@@ -114,6 +125,7 @@ export async function init(setupScene = () => {}, onFrame = () => {}) {
 		camera.updateProjectionMatrix();
 
 		renderer.setSize(window.innerWidth, window.innerHeight);
+		css3dRenderer.setSize(window.innerWidth, window.innerHeight);
 	}
 
 	window.addEventListener('resize', onWindowResize);
@@ -122,6 +134,8 @@ export async function init(setupScene = () => {}, onFrame = () => {}) {
 		scene,
 		camera,
 		renderer,
+		css3dScene,
+		css3dRenderer,
 		player,
 		controllers,
 	};
@@ -139,6 +153,7 @@ export async function init(setupScene = () => {}, onFrame = () => {}) {
 		});
 		onFrame(delta, time, globals);
 		renderer.render(scene, camera);
+		css3dRenderer.render(css3dScene, camera);
 	}
 
 	renderer.setAnimationLoop(animate);

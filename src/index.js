@@ -31,9 +31,11 @@ const blasterInertia = {
 	maxTilt: 0.12,
 };
 
-// Sfere con liquido finto (due occhi) - ruotano in senso opposto al movimento
+// Sfere con liquido finto (due occhi) - piani sempre verso l'alto (giroscopio)
 const liquidSpheresContainer = new THREE.Group();
-const liquidMeshes = []; // [{ mesh, inertia }, ...]
+const liquidMeshes = []; // [{ mesh }, ...]
+const liquidBaseQuat = new THREE.Quaternion().setFromEuler(new THREE.Euler(-Math.PI / 2, 0, 0));
+const liquidParentWorldQuat = new THREE.Quaternion();
 const liquidSphereInertia = {
 	prevPos: new THREE.Vector3(),
 	prevQuat: new THREE.Quaternion(),
@@ -63,6 +65,49 @@ scoreText.anchorY = 'middle';
 
 let laserSound, scoreSound;
 
+const VIDEO_MP4_URL = 'assets/acuvue.mp4';
+let videoPlaneMesh = null;
+let videoTexturePlane = null;
+let videoElement = null;
+let playPauseIconMesh = null;
+let pointerElRef = null;
+const raycaster = new THREE.Raycaster();
+const pointerCoords = new THREE.Vector2();
+
+const PLAY_ICON_SIZE = 128;
+
+function drawPlayPauseIcon(ctx, isPaused) {
+	ctx.fillStyle = '#1a1a1a';
+	ctx.fillRect(0, 0, PLAY_ICON_SIZE, PLAY_ICON_SIZE);
+	ctx.fillStyle = 'rgba(255,255,255,0.95)';
+	if (isPaused) {
+		// Triangolo play
+		ctx.beginPath();
+		ctx.moveTo(32, 24);
+		ctx.lineTo(32, 104);
+		ctx.lineTo(96, 64);
+		ctx.closePath();
+		ctx.fill();
+	} else {
+		// Due barre pause
+		ctx.fillRect(36, 28, 20, 72);
+		ctx.fillRect(72, 28, 20, 72);
+	}
+}
+
+function createPlayPauseTexture() {
+	const canvas = document.createElement('canvas');
+	canvas.width = PLAY_ICON_SIZE;
+	canvas.height = PLAY_ICON_SIZE;
+	const ctx = canvas.getContext('2d');
+	const texture = new THREE.CanvasTexture(canvas);
+	texture.colorSpace = THREE.SRGBColorSpace;
+	return { canvas, ctx, texture, update(isPaused) {
+		drawPlayPauseIcon(ctx, isPaused);
+		texture.needsUpdate = true;
+	} };
+}
+
 function updateScoreDisplay() {
 	const clampedScore = Math.max(0, Math.min(9999, score));
 	const displayScore = clampedScore.toString().padStart(4, '0');
@@ -70,7 +115,7 @@ function updateScoreDisplay() {
 	scoreText.sync();
 }
 
-function setupScene({ scene, camera, renderer, player, controllers }) {
+function setupScene({ scene, camera, renderer, css3dScene }) {
 	// Due sfere con liquido (occhi) davanti alla camera
 	const sphereRadius = 0.15;
 	const eyeOffset = 0.2;
@@ -118,6 +163,94 @@ function setupScene({ scene, camera, renderer, player, controllers }) {
 	liquidSpheresContainer.scale.setScalar(0.8);
 	camera.add(liquidSpheresContainer);
 	camera.getWorldPosition(liquidSphereInertia.prevPos);
+
+	// Piano video 16:9 in VR (video locale)
+	const videoWidth = 4.8;
+	const videoHeight = (videoWidth * 9) / 16;
+	const videoZ = -6;
+	const videoGroup = new THREE.Group();
+	videoGroup.position.set(0, 1.6, videoZ);
+
+	const planeGeometry = new THREE.PlaneGeometry(videoWidth, videoHeight);
+	const planeMaterial = new THREE.MeshBasicMaterial({
+		color: 0x111111,
+		visible: false,
+		side: THREE.DoubleSide,
+	});
+	videoPlaneMesh = new THREE.Mesh(planeGeometry, planeMaterial);
+	videoPlaneMesh.name = 'videoPlane';
+	videoGroup.add(videoPlaneMesh);
+
+	videoElement = document.createElement('video');
+	videoElement.src = VIDEO_MP4_URL;
+	videoElement.loop = true;
+	videoElement.muted = true;
+	videoElement.playsInline = true;
+	const videoTexture = new THREE.VideoTexture(videoElement);
+	videoTexture.colorSpace = THREE.SRGBColorSpace;
+	videoTexture.minFilter = THREE.LinearFilter;
+	videoTexture.magFilter = THREE.LinearFilter;
+	videoTexturePlane = new THREE.Mesh(
+		planeGeometry.clone(),
+		new THREE.MeshBasicMaterial({
+			map: videoTexture,
+			side: THREE.DoubleSide,
+		}),
+	);
+	videoTexturePlane.renderOrder = 1;
+	videoGroup.add(videoTexturePlane);
+
+	const playPauseTex = createPlayPauseTexture();
+	playPauseTex.update(true); // iniziale: play (video in pausa)
+	const iconSize = 0.5;
+	const iconGeometry = new THREE.PlaneGeometry(iconSize, iconSize);
+	playPauseIconMesh = new THREE.Mesh(
+		iconGeometry,
+		new THREE.MeshBasicMaterial({
+			map: playPauseTex.texture,
+			side: THREE.DoubleSide,
+			transparent: true,
+			opacity: 0.9,
+		}),
+	);
+	playPauseIconMesh.name = 'playPauseButton';
+	playPauseIconMesh.position.y = -videoHeight / 2 - iconSize / 2 - 0.15;
+	playPauseIconMesh.renderOrder = 2;
+	videoGroup.add(playPauseIconMesh);
+
+	videoElement.addEventListener('play', () => playPauseTex.update(false));
+	videoElement.addEventListener('pause', () => playPauseTex.update(true));
+
+	scene.add(videoGroup);
+
+	// Puntatore al centro (crosshair) - nascosto in VR
+	pointerElRef = document.createElement('div');
+	pointerElRef.style.cssText = `
+		position: fixed; top: 50%; left: 50%; transform: translate(-50%,-50%);
+		width: 24px; height: 24px; pointer-events: none; z-index: 100;
+		border: 2px solid rgba(255,255,255,0.8); border-radius: 50%;
+		box-shadow: 0 0 0 2px rgba(0,0,0,0.5);
+	`;
+	document.body.appendChild(pointerElRef);
+
+	function checkVideoClickAndPlay(clientX, clientY) {
+		pointerCoords.set((clientX / window.innerWidth) * 2 - 1, -(clientY / window.innerHeight) * 2 + 1);
+		raycaster.setFromCamera(pointerCoords, camera);
+		const iconHits = raycaster.intersectObject(playPauseIconMesh, true);
+		if (iconHits.length > 0 && videoElement) {
+			if (videoElement.paused) videoElement.play().catch(() => {});
+			else videoElement.pause();
+			return;
+		}
+		const hits = raycaster.intersectObject(videoPlaneMesh, true);
+		if (hits.length > 0 && videoElement) {
+			videoElement.play().catch(() => {});
+		}
+	}
+
+	renderer.domElement.addEventListener('click', (e) => {
+		checkVideoClickAndPlay(e.clientX, e.clientY);
+	});
 
 	// Giroscopio DeviceMotion (mobile, richiede permesso su iOS)
 	if (typeof DeviceMotionEvent !== 'undefined') {
@@ -190,6 +323,9 @@ function onFrame(
 	time,
 	{ scene, camera, renderer, player, controllers },
 ) {
+	// In VR nascondi puntatore
+	if (pointerElRef) pointerElRef.style.display = renderer.xr.isPresenting ? 'none' : '';
+
 	// Liquido: ruota in senso opposto allo spostamento + giroscopio, oscillazione quando ti fermi
 	const refPos = new THREE.Vector3();
 	let refQuat = null;
@@ -293,31 +429,42 @@ function onFrame(
 		blasterGroup.rotation.y = blasterInertia.tiltY;
 		blasterGroup.rotation.z = blasterInertia.tiltZ;
 		if (gamepad.getButtonClick(XR_BUTTONS.TRIGGER)) {
-			try {
-				gamepad.getHapticActuator(0).pulse(0.6, 100);
-			} catch {
-				// do nothing
-			}
+			const controllerDir = new THREE.Vector3(0, 0, -1).applyQuaternion(raySpace.quaternion);
+			const controllerOrigin = new THREE.Vector3().setFromMatrixPosition(raySpace.matrixWorld);
+			raycaster.set(controllerOrigin, controllerDir);
+			const iconHits = raycaster.intersectObject(playPauseIconMesh, true);
+			if (playPauseIconMesh && iconHits.length > 0 && videoElement) {
+				if (videoElement.paused) videoElement.play().catch(() => {});
+				else videoElement.pause();
+			} else {
+				const videoHits = raycaster.intersectObject(videoPlaneMesh, true);
+				if (videoPlaneMesh && videoHits.length > 0 && videoElement) {
+					videoElement.play().catch(() => {});
+				} else {
+					try {
+						gamepad.getHapticActuator(0).pulse(0.6, 100);
+					} catch {
+						// do nothing
+					}
+					if (laserSound.isPlaying) laserSound.stop();
+					laserSound.play();
+					const bulletPrototype = blasterGroup.getObjectByName('bullet');
+					if (bulletPrototype) {
+						const bullet = bulletPrototype.clone();
+						scene.add(bullet);
+						bulletPrototype.getWorldPosition(bullet.position);
+						bulletPrototype.getWorldQuaternion(bullet.quaternion);
 
-			// Play laser sound
-			if (laserSound.isPlaying) laserSound.stop();
-			laserSound.play();
-
-			const bulletPrototype = blasterGroup.getObjectByName('bullet');
-			if (bulletPrototype) {
-				const bullet = bulletPrototype.clone();
-				scene.add(bullet);
-				bulletPrototype.getWorldPosition(bullet.position);
-				bulletPrototype.getWorldQuaternion(bullet.quaternion);
-
-				const directionVector = forwardVector
-					.clone()
-					.applyQuaternion(bullet.quaternion);
-				bullet.userData = {
-					velocity: directionVector.multiplyScalar(bulletSpeed),
-					timeToLive: bulletTimeToLive,
-				};
-				bullets[bullet.uuid] = bullet;
+						const directionVector = forwardVector
+							.clone()
+							.applyQuaternion(bullet.quaternion);
+						bullet.userData = {
+							velocity: directionVector.multiplyScalar(bulletSpeed),
+							timeToLive: bulletTimeToLive,
+						};
+						bullets[bullet.uuid] = bullet;
+					}
+				}
 			}
 		}
 	}
