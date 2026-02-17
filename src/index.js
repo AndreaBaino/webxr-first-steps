@@ -284,7 +284,7 @@ function setupScene({ scene, camera, renderer, css3dScene }) {
 		scene.add(gltf.scene);
 	});
 
-	gltfLoader.load('assets/blaster.glb', (gltf) => {
+	gltfLoader.load('assets/scatola-lenti.glb', (gltf) => {
 		blasterGroup.add(gltf.scene);
 	});
 
@@ -327,7 +327,11 @@ function setupScene({ scene, camera, renderer, css3dScene }) {
 	audioLoader.load('assets/autunno.mp3', (buffer) => {
 		bgMusic.setBuffer(buffer);
 		bgMusic.setLoop(true);
-		bgMusic.play().catch(() => {});
+		try {
+			bgMusic.play();
+		} catch (e) {
+			// Autoplay può essere bloccato dal browser
+		}
 	});
 }
 
