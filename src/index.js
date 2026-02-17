@@ -62,11 +62,11 @@ const scoreText = new Text();
 scoreText.fontSize = 0.52;
 scoreText.font = 'assets/SpaceMono-Bold.ttf';
 scoreText.position.z = -2;
-scoreText.color = 0xffa276;
+scoreText.color = 0xb1e8fe;
 scoreText.anchorX = 'center';
 scoreText.anchorY = 'middle';
 
-let laserSound, scoreSound;
+let laserSound, scoreSound, bgMusic;
 
 const VIDEO_MP4_URL = 'assets/acuvue.mp4';
 let videoPlaneMesh = null;
@@ -169,9 +169,10 @@ function setupScene({ scene, camera, renderer, css3dScene }) {
 	// Piano video 16:9 in VR (video locale)
 	const videoWidth = 4.8;
 	const videoHeight = (videoWidth * 9) / 16;
-	const videoZ = -6;
+	const videoZ = 6;
 	const videoGroup = new THREE.Group();
-	videoGroup.position.set(0, 1.6, videoZ);
+	videoGroup.position.set(0, 3, videoZ);
+	videoGroup.rotation.y = Math.PI;
 
 	const planeGeometry = new THREE.PlaneGeometry(videoWidth, videoHeight);
 	const planeMaterial = new THREE.MeshBasicMaterial({
@@ -320,6 +321,13 @@ function setupScene({ scene, camera, renderer, css3dScene }) {
 	audioLoader.load('assets/score.ogg', (buffer) => {
 		scoreSound.setBuffer(buffer);
 		scoreText.add(scoreSound);
+	});
+
+	bgMusic = new THREE.Audio(listener);
+	audioLoader.load('assets/autunno.mp3', (buffer) => {
+		bgMusic.setBuffer(buffer);
+		bgMusic.setLoop(true);
+		bgMusic.play().catch(() => {});
 	});
 }
 
