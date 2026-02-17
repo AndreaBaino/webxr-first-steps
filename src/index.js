@@ -275,7 +275,7 @@ function setupScene({ scene, camera, renderer, css3dScene }) {
 
 	const gltfLoader = new GLTFLoader();
 
-	gltfLoader.load('assets/spacestation.glb', (gltf) => {
+	gltfLoader.load('assets/parco-scena.glb', (gltf) => {
 		scene.add(gltf.scene);
 	});
 
