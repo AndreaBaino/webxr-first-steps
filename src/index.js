@@ -119,6 +119,8 @@ function updateScoreDisplay() {
 }
 
 function setupScene({ scene, camera, renderer, css3dScene }) {
+	scene.background = new THREE.Color(0x87ceeb);
+
 	// Due sfere con liquido (occhi) davanti alla camera
 	const sphereRadius = 0.15;
 	const eyeOffset = 0.2;
