@@ -35,7 +35,10 @@ module.exports = {
 			template: './src/index.html',
 		}),
 		new CopyPlugin({
-			patterns: [{ from: 'src/assets', to: 'assets' }],
+			patterns: [
+				{ from: 'src/assets', to: 'assets' },
+				{ from: 'node_modules/three/examples/jsm/libs/draco/gltf', to: 'draco/gltf' },
+			],
 		}),
 	],
 	devtool: 'source-map',

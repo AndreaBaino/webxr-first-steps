@@ -7,6 +7,7 @@
 
 import * as THREE from 'three';
 
+import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { Text } from 'troika-three-text';
 import { XR_BUTTONS } from 'gamepad-wrapper';
@@ -274,6 +275,9 @@ function setupScene({ scene, camera, renderer, css3dScene }) {
 	}
 
 	const gltfLoader = new GLTFLoader();
+	const dracoLoader = new DRACOLoader();
+	dracoLoader.setDecoderPath('draco/gltf/');
+	gltfLoader.setDRACOLoader(dracoLoader);
 
 	gltfLoader.load('assets/parco-scena.glb', (gltf) => {
 		scene.add(gltf.scene);
